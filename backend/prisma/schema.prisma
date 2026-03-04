@@ -12,3 +12,276 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum Role {
+  CUSTOMER
+  STAFF
+  ADMIN
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  HESABPAY
+  CASH
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum TableStatus {
+  AVAILABLE
+  RESERVED
+  OCCUPIED
+}
+
+enum VariantType {
+  SIZE
+  EXTRA
+}
+
+model User {
+  id            String        @id @default(cuid())
+  name          String
+  email         String        @unique
+  phone         String?
+  password      String
+  role          Role          @default(CUSTOMER)
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  address       Address?
+  orders        Order[]
+  reservations  Reservation[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Address {
+  id         String  @id @default(cuid())
+  userId     String  @unique          // @unique enforces one address per user
+  street     String
+  city       String
+  district   String?
+  postalCode String?
+  fullAddress String
+
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders     Order[]
+
+  @@map("addresses")
+}
+
+// ============================================================
+// MENU
+// ============================================================
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  image     String?
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  menuItems MenuItem[]
+
+  @@map("categories")
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  basePrice   Float
+  image       String?
+  isAvailable Boolean  @default(true)
+  isFeatured  Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  categoryId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category   Category          @relation(fields: [categoryId], references: [id])
+  variants   MenuItemVariant[]
+  orderItems OrderItem[]
+
+  @@map("menu_items")
+}
+
+model MenuItemVariant {
+  id            String      @id @default(cuid())
+  menuItemId    String
+  type          VariantType       // SIZE | EXTRA
+  name          String            // e.g. "Large", "Extra Cheese"
+  priceModifier Float       @default(0)
+  isDefault     Boolean     @default(false)
+  isAvailable   Boolean     @default(true)
+  sortOrder     Int         @default(0)
+
+  menuItem          MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  orderItemVariants OrderItemVariant[]
+
+  @@map("menu_item_variants")
+}
+
+// ============================================================
+// TABLES
+// ============================================================
+
+model Table {
+  id           String        @id @default(cuid())
+  number       Int           @unique
+  capacity     Int
+  status       TableStatus   @default(AVAILABLE)
+  location     String?       // e.g. "Indoor", "Outdoor", "VIP"
+  isActive     Boolean       @default(true)
+
+  reservations Reservation[]
+
+  @@map("tables")
+}
+
+// ============================================================
+// ORDERS
+// ============================================================
+
+model Order {
+  id            String        @id @default(cuid())
+  userId        String
+  type          OrderType
+  status        OrderStatus   @default(PENDING)
+  paymentStatus PaymentStatus @default(UNPAID)
+  subtotal      Float
+  deliveryFee   Float         @default(0)
+  discount      Float         @default(0)
+  total         Float
+  notes         String?
+
+  // Delivery — snapshot of address at order time (in case user updates address later)
+  addressId     String?
+  addressSnapshot Json? // { street, city, district, postalCode, fullAddress }
+  // Dine-in — snapshot of table number at order time
+  tableNumber   String?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id])
+  address       Address?      @relation(fields: [addressId], references: [id])
+  items         OrderItem[]
+  payment       Payment?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  orderId    String
+  menuItemId String
+  quantity   Int
+  unitPrice  Float    // price snapshot at order time
+  totalPrice Float
+  notes      String?
+
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  variants   OrderItemVariant[]
+
+  @@map("order_items")
+}
+
+model OrderItemVariant {
+  id            String          @id @default(cuid())
+  orderItemId   String
+  variantId     String
+  name          String          // snapshot
+  priceModifier Float           // snapshot
+
+  orderItem     OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  variant       MenuItemVariant @relation(fields: [variantId], references: [id])
+
+  @@map("order_item_variants")
+}
+
+// ============================================================
+// RESERVATIONS
+// ============================================================
+
+model Reservation {
+  id        String            @id @default(cuid())
+  userId    String
+  tableId   String
+  date      DateTime
+  time      String            // e.g. "19:30"
+  guests    Int
+  status    ReservationStatus @default(PENDING)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id])
+  table     Table             @relation(fields: [tableId], references: [id])
+
+  @@map("reservations")
+}
+
+// ============================================================
+// PAYMENTS
+// ============================================================
+
+model Payment {
+  id            String          @id @default(cuid())
+  orderId       String          @unique
+  amount        Float
+  provider      PaymentProvider @default(HESABPAY)
+  transactionId String?
+  status        PaymentStatus   @default(UNPAID)
+  paidAt        DateTime?
+  metadata      Json?           // raw HesabPay webhook response
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  order         Order           @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
