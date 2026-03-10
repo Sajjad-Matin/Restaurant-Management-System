@@ -240,7 +240,6 @@ Payment       → id, orderId, amount, provider, transactionId, status
 | Admin Dashboard | Vercel |
 | Database | Railway PostgreSQL or Supabase |
 | Images | Cloudinary |
-
 ---
 
 ## License
